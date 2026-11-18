@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas import ActionResult, EntryPayload, PageResult
+from app.services import merge_storage
 from app.services.merge import MergeService
 
 router = APIRouter(prefix="/api/merge", tags=["结果聚合归并"])
@@ -28,6 +29,51 @@ def list_entries(
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
     items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+@router.get("/storage-admission", response_model=dict)
+def list_storage_admission(
+    policy_version: str | None = Query(default=None, description="策略版本，缺省返回全部版本"),
+    status: str | None = Query(default=None, description="待处理、待复核"),
+    page: int = 1,
+    size: int = 200,
+) -> dict[str, Any]:
+    """新增存储分层准入待处理队列：由分层归档结果写入，按策略版本可核对。"""
+    if size > 500:
+        raise HTTPException(status_code=400, detail="每页最多 500 条，请缩小分页范围")
+    items, total = service.list_storage_admission(
+        policy_version=policy_version, status=status, page=page, size=size
+    )
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "size": size,
+        "policy_versions": merge_storage.policy_versions(),
+    }
+
+
+@router.get("/storage-archive", response_model=dict)
+def reference_storage_archive(
+    policy_version: str | None = Query(default=None, description="策略版本，缺省取最新版本"),
+) -> dict[str, Any]:
+    """结果聚合读取分层归档结果：只引用同一策略版本下的可用层级。"""
+    return service.reference_storage_archive(policy_version)
+
+
+@router.post("/storage-sync", response_model=ActionResult)
+def sync_storage_admission(payload: EntryPayload) -> ActionResult:
+    """另一个入口：同步刷新新增存储分层准入清单与分层归档结果数据。"""
+    policy_version = str(payload.values.get("策略版本") or "").strip() or None
+    summary = service.sync_storage_admission(policy_version)
+    return ActionResult(
+        ok=True,
+        message=(
+            f"新增存储分层准入清单已刷新：策略版本 {summary['policy_version']}，"
+            f"归档结果 {summary['archive_total']} 条，待处理 {summary['queue_total']} 条"
+        ),
+        entry=summary,
+    )
 
 
 @router.get("/{entry_id}", response_model=dict)

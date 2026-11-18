@@ -32,6 +32,14 @@ def health() -> dict[str, object]:
     return {"ok": True, "app": settings.app_name, "modules": len(store.module_names())}
 
 
+@app.on_event("startup")
+def refresh_storage_lists() -> None:
+    """启动时按最新策略版本刷新一次归档读侧，保证首屏就能看到准入清单。"""
+    from app.services import merge_storage
+
+    merge_storage.refresh()
+
+
 @app.get("/api/overview")
 def overview() -> dict[str, object]:
     """运营概览：把各业务模块的待处理量汇总成看板卡片。"""
